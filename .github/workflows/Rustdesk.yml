@@ -1,4 +1,4 @@
-name: Cloud PC + RustDesk + Opera GX (Legacy ID Extraction)
+name: Cloud PC + RustDesk + Opera GX (Native ID Extraction)
 
 on:
   workflow_dispatch:
@@ -31,37 +31,20 @@ jobs:
               if (Test-Path "$userDesktop\$target") { Remove-Item "$userDesktop\$target" -Force -ErrorAction SilentlyContinue }
           }
 
-      - name: Download and Force Install RustDesk Client (Legacy Build)
+      - name: Download and Force Install RustDesk Client
         run: |
-          Write-Host "Fetching Legacy unencrypted RustDesk Layout from GitHub Archive..."
-          $url = "https://github.com/rustdesk/rustdesk/releases/download/1.1.9/rustdesk-1.1.9-windows_x64.zip"
-          $zipDst = "$env:TEMP\RustDeskLegacy.zip"
-          $extractDir = "C:\Program Files\RustDesk"
+          Write-Host "Fetching RustDesk Executable Layout from GitHub Mirror..."
+          $url = "https://github.com/rustdesk/rustdesk/releases/download/1.3.1/rustdesk-1.3.1-x86_64.exe"
+          $dst = "$env:TEMP\RustDeskSetup.exe"
           
           [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-          Invoke-WebRequest -Uri $url -OutFile $zipDst -UserAgent "Mozilla/5.0"
+          Invoke-WebRequest -Uri $url -OutFile $dst -UserAgent "Mozilla/5.0"
           
-          Write-Host "Unpacking and deploying legacy binaries..."
-          if (-not (Test-Path $extractDir)) { New-Item -ItemType Directory -Path $extractDir -Force }
-          Expand-Archive -Path $zipDst -DestinationPath $extractDir -Force
-          
-          # Fix for nested folders inside the zip: Find the actual .exe file deep inside the folder
-          $exeFile = Get-ChildItem -Path $extractDir -Filter "*.exe" -Recurse | Select-Object -First 1
-          if ($exeFile) {
-              Write-Host "Found binary at: $($exeFile.FullName). Moving to destination root..."
-              Move-Item -Path $exeFile.FullName -Destination "$extractDir\rustdesk.exe" -Force
-          }
-          
-          Write-Host "Registering background system execution threads..."
-          $rdExe = "$extractDir\rustdesk.exe"
-          if (Test-Path $rdExe) {
-              Start-Process $rdExe -ArgumentList "--install-service" -Wait
-              Start-Sleep -Seconds 10
-          } else {
-              Write-Error "CRITICAL: Could not find or isolate the RustDesk executable!"
-              exit 1
-          }
-          Remove-Item $zipDst -ErrorAction SilentlyContinue
+          Write-Host "Executing silent installation sequence..."
+          # Force a proper system install directory deployment
+          Start-Process $dst -ArgumentList "--install" -Wait
+          Start-Sleep -Seconds 10
+          Remove-Item $dst -ErrorAction SilentlyContinue
 
       - name: Configure Unattended Security Password & Connection Profile
         run: |
@@ -70,9 +53,12 @@ jobs:
           
           if (Test-Path $rdExe) {
               Start-Process -FilePath $rdExe -ArgumentList "--password", "${{ env.RUSTDESK_PASS }}" -Wait
+          } else {
+              Write-Error "CRITICAL: RustDesk binary path not found!"
+              exit 1
           }
           
-          New-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "EnableUIADesToggle" -PropertyType DWord -Value 1 -Force -ErrorAction SilentlyContinue
+          New-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "EnableUIADesktopToggle" -PropertyType DWord -Value 1 -Force -ErrorAction SilentlyContinue
           
           $path = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"
           Set-ItemProperty -Path $path -Name "TaskbarGlomLevel" -Value 0 -ErrorAction SilentlyContinue
@@ -114,34 +100,21 @@ jobs:
           $Shortcut.Arguments = "https://www.opera.com/gx/forsaken --no-first-run --enable-features=GXRewards,GXRewardsSidebarItem --with-feature:gx-rewards=1"
           $Shortcut.Save()
 
-      - name: Fetch and Display Legacy RustDesk Connection Credentials
+      - name: Fetch and Display RustDesk Connection Credentials
         run: |
-          Write-Host "Scanning infrastructure maps for unencrypted plain text RustDesk keys..."
-          $deviceId = "Fetching..."
+          Write-Host "Querying RustDesk core service via CLI endpoint..."
+          $rdExe = "C:\Program Files\RustDesk\rustdesk.exe"
+          $deviceId = "Not Found"
           
-          # Loop up to 15 times to give the legacy background client enough time to handshake and populate the file
+          # Poll the internal CLI helper to get the generated ID directly
           for ($i = 1; $i -le 15; $i++) {
-              $configPath = "C:\Windows\ServiceProfiles\LocalService\AppData\Roaming\RustDesk\config\RustDesk_local.toml"
-              if (Test-Path $configPath) {
-                  $content = Get-Content $configPath -Raw
-                  if ($content -match 'id\s*=\s*''(\d+)''') {
-                      $deviceId = $Matches[1]
-                      break
-                  }
+              $idOutput = & $rdExe --get-id 2>$null
+              if ($idOutput -match '(\d+)') {
+                  $deviceId = $Matches[1]
+                  break
               }
-              
-              $altPath = "$env:APPDATA\RustDesk\config\RustDesk_local.toml"
-              if (Test-Path $altPath) {
-                  $content = Get-Content $altPath -Raw
-                  if ($content -match 'id\s*=\s*''(\d+)''') {
-                      $deviceId = $Matches[1]
-                      break
-                  }
-              }
-              Start-Sleep -Seconds 2
+              Start-Sleep -Seconds 3
           }
-          
-          if ($deviceId -eq "Fetching...") { $deviceId = "Not Found (Handshake Timeout)" }
           
           $ESC = [char]27
           $Green = "$ESC[32m"
@@ -150,7 +123,7 @@ jobs:
           $Reset = "$ESC[0m"
           
           Write-Host "${Green}====================================================${Reset}"
-          Write-Host "${Green}      LEGACY RUSTDESK CLOUD PC IS ONLINE            ${Reset}"
+          Write-Host "${Green}      RUSTDESK CLOUD PC IS READY TO CONNECT         ${Reset}"
           Write-Host "${Green}====================================================${Reset}"
           Write-Host "${Yellow} RUSTDESK ID     : ${Red}${deviceId}${Reset}"
           Write-Host "${Yellow} ACCESS PASSWORD : ${Red}${{ env.RUSTDESK_PASS }}${Reset}"

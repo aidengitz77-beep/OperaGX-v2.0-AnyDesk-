@@ -1,4 +1,4 @@
-name: Cloud PC + Web Browser Link + Opera GX (Tunnel Sync Fix)
+name: Cloud PC + Web Browser Link + Opera GX (Guaranteed Sync)
 
 on:
   workflow_dispatch:
@@ -21,113 +21,62 @@ jobs:
     steps:
       - name: Wipe Unnecessary Pre-Installed GitHub Apps & Shortcuts
         run: |
-          Write-Host "Purging pre-installed desktop icons..."
           $publicDesktop = [Environment]::GetFolderPath("CommonDesktopDirectory")
-          $userDesktop = "$env:USERPROFILE\Desktop"
-          
           $targets = @("Unity Hub.lnk", "R 4.6.0.lnk", "Firefox.lnk", "Google Chrome.lnk", "Claim Rewards Here.lnk")
-          foreach ($target in $targets) {
-              if (Test-Path "$publicDesktop\$target") { Remove-Item "$publicDesktop\$target" -Force -ErrorAction SilentlyContinue }
-              if (Test-Path "$userDesktop\$target") { Remove-Item "$userDesktop\$target" -Force -ErrorAction SilentlyContinue }
-          }
+          foreach ($target in $targets) { Remove-Item "$publicDesktop\$target" -Force -ErrorAction SilentlyContinue }
 
-      - name: Force Full HD Screen Resolution Calibration
-        run: |
-          Write-Host "Forcing display matrix canvas to 1920x1080..."
-          Set-DisplayResolution -Width 1920 -Height 1080 -Force -ErrorAction SilentlyContinue
+      - name: Force Full HD Resolution
+        run: Set-DisplayResolution -Width 1920 -Height 1080 -Force
 
       - name: Install and Configure TightVNC Server
         run: |
-          Write-Host "Downloading TightVNC backend..."
-          $url = "https://www.tightvnc.com/download/2.8.84/tightvnc-2.8.84-gpl-setup-64bit.msi"
-          $msi = "$env:TEMP\tightvnc.msi"
-          Invoke-WebRequest -Uri $url -OutFile $msi
-          
-          Write-Host "Installing silently..."
-          Start-Process msiexec.exe -ArgumentList "/i `"$msi`"", "/quiet", "/qn", "SERVER_REGISTER_AS_SERVICE=1", "SET_PASSWORD=1", "VALUE_PASSWORD=${{ env.VNC_PASS }}", "SET_VIEWONLY_PASSWORD=1", "VALUE_VIEWONLY_PASSWORD=${{ env.VNC_PASS }}" -Wait
-          Start-Sleep -Seconds 5
+          Invoke-WebRequest -Uri "https://www.tightvnc.com/download/2.8.84/tightvnc-2.8.84-gpl-setup-64bit.msi" -OutFile "$env:TEMP\tightvnc.msi"
+          Start-Process msiexec.exe -ArgumentList "/i `"$env:TEMP\tightvnc.msi`" /quiet /qn SERVER_REGISTER_AS_SERVICE=1 SET_PASSWORD=1 VALUE_PASSWORD=${{ env.VNC_PASS }} SET_VIEWONLY_PASSWORD=1 VALUE_VIEWONLY_PASSWORD=${{ env.VNC_PASS }}" -Wait
 
       - name: Download & Force Consumer Build of Opera GX
         run: |
-          Write-Host "Fetching consumer-stable Opera GX Core..."
-          $url = "https://net.geo.opera.com/opera_gx/stable/windows?utm_source=inf&utm_medium=gx"
-          $installer = "$env:TEMP\OperaGXSetup.exe"
-          Invoke-WebRequest -Uri $url -OutFile $installer
-          
-          Start-Process -FilePath $installer -ArgumentList "--silent=1", "--allusers=1", "--launchbrowser=0", "--desktopshortcut=1" -Wait
-          
-          $publicDesktop = [Environment]::GetFolderPath("CommonDesktopDirectory")
-          $userDesktop = "$env:USERPROFILE\Desktop"
-          
-          if (Test-Path "$userDesktop\Opera GX.lnk") {
-              Move-Item -Path "$userDesktop\Opera GX.lnk" -Destination $publicDesktop -Force -ErrorAction SilentlyContinue
-          }
-          
-          $operaExe = "$env:ProgramFiles\Opera GX\opera.exe"
-          if (-not (Test-Path $operaExe)) { $operaExe = "$env:ProgramFiles (x86)\Opera GX\opera.exe" }
-          
-          $WshShell = New-Object -ComObject WScript.Shell
-          $Shortcut = $WshShell.CreateShortcut("$publicDesktop\Opera GX Browser.lnk")
-          $Shortcut.TargetPath = $operaExe
-          $Shortcut.Arguments = "https://www.opera.com/gx/forsaken --no-first-run --enable-features=GXRewards,GXRewardsSidebarItem --with-feature:gx-rewards=1"
-          $Shortcut.Save()
+          Invoke-WebRequest -Uri "https://net.geo.opera.com/opera_gx/stable/windows?utm_source=inf&utm_medium=gx" -OutFile "$env:TEMP\OperaGXSetup.exe"
+          Start-Process -FilePath "$env:TEMP\OperaGXSetup.exe" -ArgumentList "--silent=1", "--allusers=1", "--launchbrowser=0" -Wait
 
-      - name: Deploy noVNC Web Client Bridge & Secure Tunnel Engine
+      - name: Deploy Bridge & Secure Tunnel Engine
         run: |
-          Write-Host "Downloading Node web-bridge utilities..."
-          npm install -g websockify --silent 2>$null
-          
-          # Download noVNC standalone web interface
-          New-Item -ItemType Directory -Path "C:\noVNC" -Force | Out-Null
+          npm install -g websockify --silent
+          New-Item -ItemType Directory -Path "C:\noVNC" -Force
           Invoke-WebRequest -Uri "https://github.com/novnc/noVNC/archive/refs/tags/v1.5.0.zip" -OutFile "novnc.zip"
           Expand-Archive -Path "novnc.zip" -DestinationPath "C:\noVNC" -Force
           Copy-Item -Path "C:\noVNC\noVNC-1.5.0\*" -Destination "C:\noVNC" -Recurse -Force
-          
-          Write-Host "Downloading Cloudflare binary from official production branch..."
-          $cldUrl = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
-          Invoke-WebRequest -Uri $cldUrl -OutFile "tunnel.exe" -UserAgent "Mozilla/5.0"
+          Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "tunnel.exe"
 
-      - name: Start Web Services & Expose Link
+      - name: Start Services & Verify Handshake
         run: |
-          Write-Host "Bridging VNC to Web Ports..."
+          Write-Host "Starting Internal Bridge..."
           Start-Process websockify -ArgumentList "8080 localhost:5900 --web C:\noVNC"
           
-          Write-Host "Giving internal web server 15 seconds to fully bind ports..."
-          Start-Sleep -Seconds 15
+          Write-Host "Verifying port 8080 handshake..."
+          $retries = 0
+          while (-not (Test-NetConnection -ComputerName 127.0.0.1 -Port 8080).TcpTestSucceeded -and $retries -lt 15) {
+              Write-Host "Waiting for service... ($retries/15)"
+              Start-Sleep -Seconds 2
+              $retries++
+          }
           
-          Write-Host "Creating Public High-Speed HTTP Web Proxy..."
+          Write-Host "Launching Cloudflare Tunnel..."
           $LogFile = "$env:TEMP\tunnel.log"
-          # explicitly targeting 127.0.0.1 loopback rules out 530 unregistration drops
           Start-Process .\tunnel.exe -ArgumentList "tunnel", "--url", "http://127.0.0.1:8080" -RedirectStandardError $LogFile
           Start-Sleep -Seconds 10
           
-          $WebLink = "Failed to generate link"
-          if (Test-Path $LogFile) {
-              $LogContent = Get-Content $LogFile -Raw
-              if ($LogContent -match 'https://[a-zA-Z0-9-]+\.trycloudflare\.com') {
-                  $WebLink = $Matches[0] + "/vnc.html"
-              }
+          $WebLink = (Get-Content $LogFile -Raw) | Select-String -Pattern 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' | Select-Object -ExpandProperty Matches | Select-Object -ExpandProperty Value -First 1
+          if ($WebLink) {
+              $FinalUrl = $WebLink + "/vnc.html"
+              Write-Host "===================================================="
+              Write-Host "      WEB-BROWSER CLOUD PC IS READY TO CONNECT      "
+              Write-Host "===================================================="
+              Write-Host " CLICK LINK: $FinalUrl"
+              Write-Host " PASSWORD  : ${{ env.VNC_PASS }}"
+              Write-Host "===================================================="
+          } else {
+              Write-Error "CRITICAL: Cloudflare failed to register the tunnel."
           }
-          
-          $ESC = [char]27
-          $Green = "$ESC[32m"
-          $Yellow = "$ESC[33m"
-          $Red = "$ESC[31m"
-          $Reset = "$ESC[0m"
-          
-          Write-Host "${Green}====================================================${Reset}"
-          Write-Host "${Green}      WEB-BROWSER CLOUD PC IS READY TO CONNECT       ${Reset}"
-          Write-Host "${Green}====================================================${Reset}"
-          Write-Host "${Yellow} CLICK TO OPEN IN PHONE WEB BROWSER: ${Reset}"
-          Write-Host "${Red}${WebLink}${Reset}"
-          Write-Host "${Yellow} ACCESS PASSWORD : ${Red}${{ env.VNC_PASS }}${Reset}"
-          Write-Host "${Green}====================================================${Reset}"
 
       - name: Keep alive
-        run: |
-          $mins = [int]"${{ env.RUNTIME_MINUTES }}"
-          $end = (Get-Date).AddMinutes($mins)
-          while ((Get-Date) -lt $end) {
-            Write-Host ("Cloud PC Heartbeat " + (Get-Date).ToString("HH:mm:ss") + " | Active until " + $end.ToString("HH:mm:ss"))
-            Start-Sleep -Seconds 60
-          }
+        run: Start-Sleep -Seconds 10000 

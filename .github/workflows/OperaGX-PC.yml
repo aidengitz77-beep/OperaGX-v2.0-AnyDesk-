@@ -78,7 +78,7 @@ jobs:
           $installer = "$env:TEMP\OperaGXSetup.exe"
           Invoke-WebRequest -Uri $url -OutFile $installer
           
-          Write-Host "Pre-installing Opera GX silently for all users..."
+          Write-Host "Pre-installing Opera GX silently..."
           $args = @(
               "--silent=1",
               "--allusers=1",
@@ -96,24 +96,20 @@ jobs:
               Move-Item -Path "$userDesktop\Opera GX.lnk" -Destination $publicDesktop -Force -ErrorAction SilentlyContinue
           }
           
-          Write-Host "Triggering GX Rewards initialization via promotional loop..."
-          # Locate the freshly installed executable
-          $operaExe = "$env:ProgramFiles\Opera GX\opera.exe"
-          if (-not (Test-Path $operaExe)) {
-              $operaExe = "$env:ProgramFiles (x86)\Opera GX\opera.exe"
-          }
+          Write-Host "Creating a direct Video Trigger Shortcut..."
+          # This builds an automatic link right on the desktop to force open the rewards page
+          $WshShell = New-Object -ComObject WScript.Shell
+          $Shortcut = $WshShell.CreateShortcut("$publicDesktop\Claim Rewards Here.lnk")
           
-          # Launch Opera GX in the background pointing straight to the rewards trigger page.
-          # This registers the gift box token on the sidebar structure before you even connect!
-          if (Test-Path $operaExe) {
-              Start-Process -FilePath $operaExe -ArgumentList "https://www.opera.com/gx/forsaken"
-              Start-Sleep -Seconds 8
-              # Softly stop the background process so it's ready for you to cleanly launch via RDP
-              Stop-Process -Name "opera" -Force -ErrorAction SilentlyContinue
-              Write-Host "GX Rewards active! The gift icon is now permanently pinned to the sidebar."
-          } else {
-              Write-Host "Warning: Could not locate opera.exe for auto-triggering profile flags."
-          }
+          # Paths to locate the executable safely
+          $operaExe = "$env:ProgramFiles\Opera GX\opera.exe"
+          if (-not (Test-Path $operaExe)) { $operaExe = "$env:ProgramFiles (x86)\Opera GX\opera.exe" }
+          
+          $Shortcut.TargetPath = $operaExe
+          $Shortcut.Arguments = "https://www.opera.com/gx/forsaken"
+          $Shortcut.Save()
+          
+          Write-Host "Opera GX and Claim Shortcut are fully configured!"
           
       - name: Keep alive (Environment Active Link)
         run: |

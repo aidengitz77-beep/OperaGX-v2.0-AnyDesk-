@@ -26,29 +26,21 @@ jobs:
     steps:
       - name: Wipe Unnecessary Pre-Installed GitHub Apps & Shortcuts
         run: |
+          Write-Host "Purging pre-installed desktop icons and non-essential software..."
           $publicDesktop = [Environment]::GetFolderPath("CommonDesktopDirectory")
-          $targets = @("Unity Hub.lnk", "R 4.6.0.lnk", "Firefox.lnk", "Google Chrome.lnk", "Claim Rewards Here.lnk")
-          foreach ($target in $targets) { Remove-Item "$publicDesktop\$target" -Force -ErrorAction SilentlyContinue }
-
-      - name: Force Full HD Resolution
-        run: |
-          Set-DisplayResolution -Width 1920 -Height 1080 -Force
-          "RUNTIME_MINUTES=${{ inputs.runtime_minutes }}" | Out-File -Append $env:GITHUB_ENV
-
-      - name: Download & Install Stable Full Offline Build of Opera GX
-        run: |
-          # Download the stable full standalone offline setup package directly
-          $gxUrl = "https://download3.operacdn.com/pub/opera_gx/109.0.5097.142/win/Opera_GX_109.0.5097.142_Setup_x64.exe"
-          Invoke-WebRequest -Uri $gxUrl -OutFile "$env:TEMP\OperaGXSetupOffline.exe"
+          $userDesktop = "$env:USERPROFILE\Desktop"
           
-          # Force a silent, complete machine-wide installation
-          Start-Process -FilePath "$env:TEMP\OperaGXSetupOffline.exe" -ArgumentList "--silent", "--allusers=1", "--launchbrowser=0" -Wait
-          Start-Sleep -Seconds 10
+          $targets = @("Unity Hub.lnk", "R 4.6.0.lnk", "Firefox.lnk", "Google Chrome.lnk", "Claim Rewards Here.lnk")
+          foreach ($target in $targets) {
+              if (Test-Path "$publicDesktop\$target") { Remove-Item "$publicDesktop\$target" -Force -ErrorAction SilentlyContinue }
+              if (Test-Path "$userDesktop\$target") { Remove-Item "$userDesktop\$target" -Force -ErrorAction SilentlyContinue }
+          }
 
-      - name: Install Python libs for Screen Capture & Automation
+      - name: Optimize Resolution for Mobile Display
         run: |
-          python -m pip install --upgrade pip --quiet
-          python -m pip install pyautogui pynput pillow --quiet
+          Write-Host "Forcing resolution calibration matrix..."
+          Set-DisplayResolution -Width 1280 -Height 720 -Force -ErrorAction SilentlyContinue
+          "RUNTIME_MINUTES=${{ inputs.runtime_minutes }}" | Out-File -Append $env:GITHUB_ENV
 
       - name: Install RustDesk Host Engine
         run: |
@@ -76,65 +68,51 @@ jobs:
           netsh advfirewall firewall delete rule name="APP-PORT-UDP-21116" 2>$null
           netsh advfirewall firewall add rule name="APP-PORT-UDP-21116" dir=in action=allow protocol=UDP localport=21116 | Out-Null
 
-      - name: Launch RustDesk UI & Hide Agent Host Console
+      - name: Download & Force Consumer Build of Opera GX
         run: |
+          Write-Host "Fetching consumer-stable Opera GX Core..."
+          $url = "https://net.geo.opera.com/opera_gx/stable/windows?utm_source=inf&utm_medium=gx"
+          $installer = "$env:TEMP\OperaGXSetup.exe"
+          Invoke-WebRequest -Uri $url -OutFile $installer
+          
+          Start-Process -FilePath $installer -ArgumentList "--silent=1", "--allusers=1", "--launchbrowser=0", "--desktopshortcut=1" -Wait
+          
+          $publicDesktop = [Environment]::GetFolderPath("CommonDesktopDirectory")
+          $userDesktop = "$env:USERPROFILE\Desktop"
+          
+          if (Test-Path "$userDesktop\Opera GX.lnk") {
+              Move-Item -Path "$userDesktop\Opera GX.lnk" -Destination $publicDesktop -Force -ErrorAction SilentlyContinue
+          }
+          
+          Write-Host "Configuring explicit launcher shortcut with forced promo link and sidebar flags..."
+          $operaExe = "$env:ProgramFiles\Opera GX\opera.exe"
+          if (-not (Test-Path $operaExe)) { $operaExe = "$env:ProgramFiles (x86)\Opera GX\opera.exe" }
+          
+          $WshShell = New-Object -ComObject WScript.Shell
+          $Shortcut = $WshShell.CreateShortcut("$publicDesktop\Opera GX Browser.lnk")
+          $Shortcut.TargetPath = $operaExe
+          # Your original link arguments that seamlessly avoid the welcome setup
+          $Shortcut.Arguments = "https://www.opera.com/gx/forsaken --no-first-run --enable-features=GXRewards,GXRewardsSidebarItem --with-feature:gx-rewards=1"
+          $Shortcut.Save()
+
+      - name: Launch RustDesk and Custom Configured Browser
+        run: |
+          # Fire up RustDesk
           $rdExe = "C:\Program Files\RustDesk\rustdesk.exe"
           Start-Process -FilePath $rdExe -ErrorAction SilentlyContinue
-          Start-Sleep -Seconds 8
-          
-          $memberDef = @'
-          [DllImport("user32.dll")]
-          public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
-          [DllImport("kernel32.dll")]
-          public static extern IntPtr GetConsoleWindow();
-          '@
-          $win32 = Add-Type -MemberDefinition $memberDef -Name "Win32Util" -Namespace "Win32" -PassThru
-          
-          $consoleHandle = $win32::GetConsoleWindow()
-          if ($consoleHandle -ne [IntPtr]::Zero) {
-              $win32::ShowWindowAsync($consoleHandle, 2) | Out-Null
-              Write-Host "GitHub Agent Host background console window hidden successfully."
-          }
+          Start-Sleep -Seconds 3
 
-      - name: Run Opera GX Custom Automation Sequence
-        run: |-
-          $PathsToCheck = @(
-              "${env:ProgramFiles}\Opera GX\launcher.exe",
-              "${env:ProgramFiles(x86)}\Opera GX\launcher.exe",
-              "${env:LOCALAPPDATA}\Programs\Opera GX\launcher.exe",
-              "C:\Program Files\Opera GX\launcher.exe"
-          )
-          
-          $OperaPath = $null
-          foreach ($Path in $PathsToCheck) {
-              if (Test-Path $Path) { $OperaPath = $Path; break }
-          }
-          
-          if ($OperaPath) {
-              Write-Host "Found Stable Opera GX at: $OperaPath"
-              Start-Process $OperaPath
-              Start-Sleep -Seconds 12
-              
-              $pyScript = @"
-          import pyautogui
-          import time
-          
-          # Close the default welcome page tab (Ctrl + W)
-          pyautogui.hotkey('ctrl', 'w')
-          time.sleep(2)
-          
-          # Force launch the collab link setup
-          pyautogui.hotkey('ctrl', 't')
-          time.sleep(1)
-          pyautogui.write('https://www.opera.com/gx/is-forsaken')
-          pyautogui.press('enter')
-          "@
-              $pyScript | Out-File -FilePath "$env:TEMP\gx_automate.py" -Encoding utf8
-              python "$env:TEMP\gx_automate.py"
-          } else {
-              Write-Error "Could not locate the Stable Opera GX installation path on disk."
-              exit 1
-          }
+          # Launch Opera GX via your custom engineered shortcut layout
+          $publicDesktop = [Environment]::GetFolderPath("CommonDesktopDirectory")
+          Start-Process "$publicDesktop\Opera GX Browser.lnk"
+          Start-Sleep -Seconds 5
+
+      - name: Minimize Running Infrastructure Windows (Agent Host Window)
+        run: |
+          Write-Host "Sending active command prompt windows to the taskbar tray..."
+          # Your original working shell automation layout to clean up the workspace view
+          $shell = New-Object -ComObject Shell.Application
+          $shell.MinimizeAll()
 
       - name: Capture Live Credentials Layout & Upload to Gofile
         run: |

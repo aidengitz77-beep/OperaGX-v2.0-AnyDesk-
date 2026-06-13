@@ -47,7 +47,6 @@ jobs:
           Write-Host "Creating custom local user profile..."
           $Password = ConvertTo-SecureString "$env:rdp_pass" -AsPlainText -Force
           
-          # Fixed the parameter bug here by removing the invalid -CreateNoPassword flag
           Remove-LocalUser -Name "$env:rdp_user" -ErrorAction SilentlyContinue
           New-LocalUser -Name "$env:rdp_user" -Password $Password -Description "Cloud PC Access Account" -PasswordNeverExpires
 
@@ -101,19 +100,31 @@ jobs:
       - name: Launch Token-Free Tunnel & Display Connection Endpoint
         run: |
           Write-Host "Initializing secure reverse port-forward via Serveo network layers..."
-          
           $logFile = "$env:TEMP\serveo.log"
-          # Establish connection out to Serveo's public SSH boundary host
-          Start-Process ssh -ArgumentList "-R 0:localhost:3389 serveo.net", "-o StrictHostKeyChecking=no", "-o ServerAliveInterval=60" -RedirectStandardOutput $logFile -NoNewWindow
           
-          Write-Host "Gathering link generation metrics..."
-          Start-Sleep -Seconds 7
+          # Try connecting using explicit sequential backup ports to guarantee server acceptance
+          $portsToTry = @("13389", "23389", "33389")
+          $CleanAddress = ""
           
-          $TunnelInfo = Get-Content $logFile | Select-String "Forwarding TCP connections on"
-          if ($TunnelInfo) {
-              $CleanAddress = ($TunnelInfo -split "on ")[1].Trim()
+          foreach ($port in $portsToTry) {
+              Write-Host "Attempting tunnel assignment on public port: $port..."
+              Remove-Item $logFile -ErrorAction SilentlyContinue
               
-              # ANSI Escape Sequences for high-visibility terminal styling
+              $proc = Start-Process ssh -ArgumentList "-R ${port}:localhost:3389 serveo.net", "-o StrictHostKeyChecking=no", "-o ServerAliveInterval=60" -RedirectStandardOutput $logFile -NoNewWindow -PassThru
+              Start-Sleep -Seconds 6
+              
+              $logContent = Get-Content $logFile -ErrorAction SilentlyContinue
+              if ($logContent -match "Forwarding TCP connections on") {
+                  $CleanAddress = "serveo.net:$port"
+                  break
+              } else {
+                  # Terminate failed port process before shifting to fallback
+                  Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+              }
+          }
+          
+          if ($CleanAddress -ne "") {
+              # ANSI Escape Sequences for structural color output execution
               $Esc = [char]27
               $Cyan = "$Esc[36m"
               $Yellow = "$Esc[33m"
@@ -130,8 +141,8 @@ jobs:
               Write-Host "${Cyan}###########################################################################${Reset}"
               Write-Host ""
           } else {
-              Write-Warning "Tunnel initialization timed out. Try re-running."
-              Get-Content $logFile -ErrorAction SilentlyContinue
+              Write-Error "All token-free public relay ports are congested. Please re-trigger the workflow."
+              exit 1
           }
 
       - name: Keep Alive Execution Loop

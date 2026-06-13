@@ -1,4 +1,4 @@
-name: Cloud PC + Web Browser Link + Opera GX (Passwordless TightVNC Fix)
+name: Cloud PC + Web Browser Link + Opera GX (Auto-Login Handshake)
 
 on:
   workflow_dispatch:
@@ -15,6 +15,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 190
     env:
+      VNC_PASS: Pass1234
       RUNTIME_MINUTES: 180
 
     steps:
@@ -27,30 +28,20 @@ jobs:
       - name: Force Full HD Resolution
         run: Set-DisplayResolution -Width 1920 -Height 1080 -Force
 
-      - name: Install and Configure TightVNC Server (Empty Encryption Profile)
+      - name: Install and Configure TightVNC Server
         run: |
           Invoke-WebRequest -Uri "https://www.tightvnc.com/download/2.8.84/tightvnc-2.8.84-gpl-setup-64bit.msi" -OutFile "$env:TEMP\tightvnc.msi"
-          # Install cleanly as a persistent headless background system service
           Start-Process msiexec.exe -ArgumentList "/i `"$env:TEMP\tightvnc.msi`" /quiet /qn SERVER_REGISTER_AS_SERVICE=1" -Wait
           
           Start-Sleep -Seconds 5
-          $vncPath = "HKLM:\SOFTWARE\TightVNC\Server"
-          if (Test-Path $vncPath) {
-              # Completely remove explicit login challenges by passing empty data arrays
-              Set-ItemProperty -Path $vncPath -Name "AuthRequired" -Value 0 -Type DWord
-              Set-ItemProperty -Path $vncPath -Name "AuthType" -Value 1 -Type DWord
-              
-              # Pre-populate empty 8-byte security keys to stop the program from auto-generating a random fallback password
-              [byte[]]$emptyHex = 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
-              Set-ItemProperty -Path $vncPath -Name "Password" -Value $emptyHex -Type Binary
-              Set-ItemProperty -Path $vncPath -Name "ControlPassword" -Value $emptyHex -Type Binary
-              
-              # Open internal port listeners wide open so the loopback proxy works flawlessly
-              Set-ItemProperty -Path $vncPath -Name "AllowLoopback" -Value 1 -Type DWord
-              Set-ItemProperty -Path $vncPath -Name "AcceptLocalConnections" -Value 1 -Type DWord
-          }
           
-          # Force refresh the system daemon to accept the wide open access policy without hanging
+          # Use TightVNC's native engine to cleanly register a stable backend password
+          $vncExe = "C:\Program Files\TightVNC\tvnserver.exe"
+          Start-Process $vncExe -ArgumentList "-controlpass -setpassword=`"${{ env.VNC_PASS }}`"" -Wait
+          Start-Process $vncExe -ArgumentList "-controlpass -setcontrolpassword=`"${{ env.VNC_PASS }}`"" -Wait
+          Start-Process $vncExe -ArgumentList "-controlpass -allowloopback=1" -Wait
+          Start-Process $vncExe -ArgumentList "-controlpass -acceptlocal=1" -Wait
+          
           Restart-Service -Name "TightVNC Server" -Force
 
       - name: Download & Force Consumer Build of Opera GX
@@ -67,7 +58,7 @@ jobs:
           Expand-Archive -Path "novnc.zip" -DestinationPath "C:\noVNC" -Force
           Copy-Item -Path "C:\noVNC\noVNC-1.5.0\*" -Destination "C:\noVNC" -Recurse -Force
 
-      - name: Start Services & Generate Unique Instant URLs
+      - name: Start Services & Generate Auto-Login URLs
         run: |
           Write-Host "Launching Native Python Web Bridge..."
           Start-Process python -ArgumentList "-m websockify 8080 localhost:5900 --web C:\noVNC"
@@ -87,12 +78,13 @@ jobs:
           $RawLink = (Get-Content $LogFile -Raw) | Select-String -Pattern 'https://[a-zA-Z0-9-]+\.loca\.lt' | Select-Object -ExpandProperty Matches | Select-Object -ExpandProperty Value -First 1
           
           if ($RawLink) {
-              $FinalUrl = $RawLink + "/vnc.html"
+              # Injecting the password parameters directly into the browser URL hook
+              $FinalUrl = $RawLink + "/vnc.html?autoconnect=true&password=" + "${{ env.VNC_PASS }}"
               Write-Host "===================================================="
               Write-Host "      WEB-BROWSER CLOUD PC IS READY TO CONNECT      "
               Write-Host "===================================================="
               Write-Host " CLICK LINK: $FinalUrl"
-              Write-Host " SECURITY  : Password disabled. Press 'Connect' button directly."
+              Write-Host " SECURITY  : Auto-login link created. Bypass active."
               Write-Host "===================================================="
           } else {
               Write-Error "CRITICAL: Dynamic gateway assignment timed out."

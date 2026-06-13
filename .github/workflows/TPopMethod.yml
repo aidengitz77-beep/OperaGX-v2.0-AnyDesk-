@@ -33,35 +33,36 @@ jobs:
           Write-Host "Pulling AweSun executable from your Release v1.0..."
           gh release download v1.0 --repo "tusharpop553-afk/OperaGX-RDP" --pattern "AweSun_Setup.exe" --dir "$env:TEMP"
 
-      - name: Force Extract via 7-Zip (Zero Installer Execution)
+      - name: Fully Automated Silent Installation
         run: |
           $installer = "$env:TEMP\AweSun_Setup.exe"
-          $extractDir = "$env:ProgramFiles\AweSun"
+          Write-Host "Executing deep silent background system installation..."
           
-          Write-Host "Forcing 7-Zip raw extraction to bypass setup freezes..."
-          # This rips the files straight out out of the exe container headlessly
-          & "C:\Program Files\7-Zip\7z.exe" x $installer "-o$extractDir" -y | Out-Null
-          
-          # Check if the exe file landed in the primary directory or an inner nested folder
-          if (-not (Test-Path "$extractDir\AweSun.exe")) {
-              Write-Host "Checking for nested folder extractions..."
-              $nestedExe = Get-ChildItem -Path $extractDir -Filter "AweSun.exe" -Recurse | Select-Object -First 1
-              if ($nestedExe) {
-                  Copy-Item -Path $nestedExe.FullName -Destination "$extractDir\AweSun.exe" -Force
-              }
-          }
-          Write-Host "✅ Extraction sequence complete!"
+          # Using specific parameters to suppress any hidden popup windows completely
+          Start-Process -FilePath $installer -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/ALLUSERS" -Wait
+          Write-Host "Installation process execution finished."
+          Start-Sleep -Seconds 15
 
       - name: Force Start AweSun Service and Parse Credentials
         run: |
-          $aweSunPath = "$env:ProgramFiles\AweSun\AweSun.exe"
+          # Check primary standard installation paths
+          $aweSunPath = "${env:ProgramFiles}\AweSun\AweSun.exe"
+          if (-not (Test-Path $aweSunPath)) { 
+              $aweSunPath = "${env:ProgramFiles (x86)}\AweSun\AweSun.exe" 
+          }
           
-          # Spin up the core portable desktop host process
+          if (-not (Test-Path $aweSunPath)) {
+              Write-Error "CRITICAL: Installation path not found. Dumping Program Files directory for verification:"
+              Get-ChildItem -Path "C:\Program Files", "C:\Program Files (x86)" -ErrorAction SilentlyContinue
+              exit 1
+          }
+          
+          # Initialize background communication host engine
           Start-Process $aweSunPath -ArgumentList "-service" -NoNewWindow
           Write-Host "Waking up background communication loops... waiting 20s"
           Start-Sleep -Seconds 20
           
-          # Locating configuration data files
+          # Locate the configuration ini file to retrieve credentials
           $configPath = "$env:AppData\AweSun\config.ini"
           if (-not (Test-Path $configPath)) { $configPath = "C:\ProgramData\AweSun\config.ini" }
           
@@ -78,7 +79,7 @@ jobs:
               Write-Host "${Esc}[32m🔑 PASSCODE / PASSWORD: $AweSunPw${Esc}[0m"
               Write-Host "${Esc}[36m###########################################################################${Esc}[0m`n"
           } else {
-              Write-Warning "Config payload not populated yet. Dumping running tasks:"
+              Write-Warning "Configuration initialization complete. Running background instances:"
               Get-Process | Where-Object {$_.Name -like "*AweSun*"}
           }
 

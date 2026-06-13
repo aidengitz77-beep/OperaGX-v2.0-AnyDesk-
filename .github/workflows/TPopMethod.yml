@@ -1,4 +1,4 @@
-name: Cloud PC + Web Browser Link + Opera GX (Absolute Passwordless Setup)
+name: Cloud PC + Web Browser Link + Opera GX (UltraVNC Stable)
 
 on:
   workflow_dispatch:
@@ -27,23 +27,39 @@ jobs:
       - name: Force Full HD Resolution
         run: Set-DisplayResolution -Width 1920 -Height 1080 -Force
 
-      - name: Install and Configure TightVNC Server (No Password)
+      - name: Install and Configure UltraVNC (Zero Prompts Passwordless)
         run: |
-          Invoke-WebRequest -Uri "https://www.tightvnc.com/download/2.8.84/tightvnc-2.8.84-gpl-setup-64bit.msi" -OutFile "$env:TEMP\tightvnc.msi"
-          # Install as a service so it runs correctly in headless GitHub environments
-          Start-Process msiexec.exe -ArgumentList "/i `"$env:TEMP\tightvnc.msi`" /quiet /qn SERVER_REGISTER_AS_SERVICE=1" -Wait
+          # Download the stable UltraVNC setup engine
+          Invoke-WebRequest -Uri "https://support.uvnc.com/download/1436/UltraVNC_1_4_36_X64_Setup.exe" -OutFile "$env:TEMP\ultravnc.exe"
+          
+          # Install silently without registering confusing system loops
+          Start-Process "$env:TEMP\ultravnc.exe" -ArgumentList "/verysilent", "/norestart", "/loadinf=`"setup.inf`"" -Wait
           
           Start-Sleep -Seconds 5
           
-          # Use TightVNC's control utility to completely remove the password requirement
-          $vncExe = "C:\Program Files\TightVNC\tvnserver.exe"
-          Start-Process $vncExe -ArgumentList "-controlpass -setpassword=`"`"" -Wait
-          Start-Process $vncExe -ArgumentList "-controlpass -setcontrolpassword=`"`"" -Wait
-          Start-Process $vncExe -ArgumentList "-controlpass -allowloopback=1" -Wait
-          Start-Process $vncExe -ArgumentList "-controlpass -acceptlocal=1" -Wait
+          # Target the configuration layout directory
+          $uvncPath = "C:\Program Files\uvnc bvba\UltraVNC"
+          Ensure-Toggle-Directory -Path $uvncPath
           
-          # Force a service restart to clear memory caches and apply the wide-open access policy
-          Restart-Service -Name "TightVNC Server" -Force
+          # Create a bulletproof text configuration that forces absolute open access
+          $iniContent = @"
+          [UltraVNC]
+          AuthRequired=0
+          AuthType=0
+          AllowLoopback=1
+          LoopbackOnly=0
+          AcceptLocalConnections=1
+          QuerySetting=2
+          Primary=1
+          Secondary=0
+          PortNumber=5900
+          "@
+          
+          # Save config cleanly to bypass Windows Registry locks
+          Set-Content -Path "$uvncPath\ultravnc.ini" -Value $iniContent -Force
+          
+          # Run the engine cleanly as an immediate background job instance
+          Start-Process "$uvncPath\winvnc.exe" -ArgumentList "-run"
 
       - name: Download & Force Consumer Build of Opera GX
         run: |
@@ -84,7 +100,7 @@ jobs:
               Write-Host "      WEB-BROWSER CLOUD PC IS READY TO CONNECT      "
               Write-Host "===================================================="
               Write-Host " CLICK LINK: $FinalUrl"
-              Write-Host " SECURITY  : Password disabled. Click 'Connect' to log in."
+              Write-Host " SECURITY  : Password disabled. Click 'Connect' to open."
               Write-Host "===================================================="
           } else {
               Write-Error "CRITICAL: Dynamic gateway assignment timed out."

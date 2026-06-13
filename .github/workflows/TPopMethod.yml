@@ -1,4 +1,4 @@
-name: Cloud PC + RustDesk + Opera GX (Ultimate Mobile Controls)
+name: Cloud PC + Native RDP Tunnel + Opera GX
 
 on:
   workflow_dispatch:
@@ -7,6 +7,9 @@ on:
         description: "Runtime in minutes (max 360)"
         required: false
         default: "355"
+      ngrok_token:
+        description: "Your Ngrok Auth Token (Paste from dashboard.ngrok.com)"
+        required: true
 
 permissions:
   contents: read
@@ -42,86 +45,40 @@ jobs:
           Set-DisplayResolution -Width 1280 -Height 720 -Force -ErrorAction SilentlyContinue
           "RUNTIME_MINUTES=${{ inputs.runtime_minutes }}" | Out-File -Append $env:GITHUB_ENV
 
-      - name: Install RustDesk Host Engine
+      - name: Create and Configure Windows User Credentials
         run: |
-          $rdExe = "C:\Program Files\RustDesk\rustdesk.exe"
-          if (-not (Test-Path $rdExe)) {
-            $rdUrl = "https://github.com/rustdesk/rustdesk/releases/download/1.3.1/rustdesk-1.3.1-x86_64.msi"
-            $installerPath = "$env:TEMP\rustdesk.msi"
-            Invoke-WebRequest -Uri $rdUrl -OutFile $installerPath
-            Start-Process msiexec.exe -ArgumentList "/i","`"$installerPath`"","/quiet","/norestart" -Wait
-            Remove-Item $installerPath -Force
-          }
-
-      - name: Configure RustDesk Network Options & Credentials
-        run: |
-          # Sets your permanent security key
-          & "C:\Program Files\RustDesk\rustdesk.exe" --password "$env:rdp_pass"
+          Write-Host "Creating custom local user profile..."
+          $Password = ConvertTo-SecureString "$env:rdp_pass" -AsPlainText -Force
           
-          # Adjust internal network parameters to bypass unauthenticated public grid block rules
-          & "C:\Program Files\RustDesk\rustdesk.exe" --config '{"id-server": "rustdesk.com"}' 2>$null
+          Remove-LocalUser -Name "$env:rdp_user" -ErrorAction SilentlyContinue
+          New-LocalUser -Name "$env:rdp_user" -Password $Password -Description "Cloud PC Access Account" -CreateNoPassword -PasswordNeverExpires
+
+          Write-Host "Elevating user privileges to Remote Desktop groups..."
+          Add-LocalGroupMember -Group "Administrators" -Member "$env:rdp_user" -ErrorAction SilentlyContinue
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "$env:rdp_user" -ErrorAction SilentlyContinue
+
+      - name: Enable Windows Remote Desktop (RDP) Services
+        run: |
+          Write-Host "Modifying registry layers to toggle RDP host features..."
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0
           
-          Write-Host "RustDesk permanent security key set to: $env:rdp_pass"
+          Write-Host "Starting and locking down Terminal Services..."
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          Set-Service -Name "TermService" -StartupType Automatic
+          Start-Service -Name "TermService" -ErrorAction SilentlyContinue
 
-      - name: Open Firewall Rules for RustDesk Port Mapping
+      - name: Install Ngrok & Establish Tunnel Network
         run: |
-          for ($p=21115; $p -le 21119; $p++) {
-            $name = "APP-PORT-TCP-$p"
-            netsh advfirewall firewall delete rule name=$name 2>$null
-            netsh advfirewall firewall add rule name=$name dir=in action=allow protocol=TCP localport=$p | Out-Null
-          }
-          netsh advfirewall firewall delete rule name="APP-PORT-UDP-21116" 2>$null
-          netsh advfirewall firewall add rule name="APP-PORT-UDP-21116" dir=in action=allow protocol=UDP localport=21116 | Out-Null
-
-      - name: Launch RustDesk Host Portal
-        run: |
-          Write-Host "Launching background primary graphics loop for RustDesk..."
-          $rdExe = "C:\Program Files\RustDesk\rustdesk.exe"
-          Start-Process -FilePath $rdExe -ErrorAction SilentlyContinue
-          Start-Sleep -Seconds 5
-
-      - name: Capture Live Credentials Layout & Upload to Gofile
-        run: |
-          $screenshotPath = "$env:TEMP\rustdesk_credentials.png"
+          Write-Host "Installing network tunnel routing engine..."
+          choco install ngrok --yes
+          Start-Sleep -Seconds 3
           
-          Add-Type -AssemblyName System.Windows.Forms
-          Add-Type -AssemblyName System.Drawing
-          $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-          $bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
-          $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-          $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
-          $bitmap.Save($screenshotPath, [System.Drawing.Imaging.ImageFormat]::Png)
-          $graphics.Dispose(); $bitmap.Dispose()
-
-          Write-Host "Uploading connection layout matrix to cloud storage..."
-          $curlResult = curl.exe -F "file=@$screenshotPath" https://store1.gofile.io/contents/uploadfile
-          $json = $curlResult | ConvertFrom-Json
-          if ($json.status -eq "ok") { 
-              $DownloadUrl = $json.data.downloadPage
-              "SCREENSHOT_URL=$DownloadUrl" | Out-File -Append $env:GITHUB_ENV
-              
-              # ANSI Escape Sequences for structural color output execution
-              $Esc = [char]27
-              $Cyan = "$Esc[36m"
-              $Yellow = "$Esc[33m"
-              $Green = "$Esc[32m"
-              $Reset = "$Esc[0m"
-
-              Write-Host ""
-              Write-Host "${Cyan}###########################################################################${Reset}"
-              Write-Host "${Yellow}🚨 ATTENTION VIEWERS: LIVE CREDENTIALS CAPTURE URL GENERATED 🚨${Reset}"
-              Write-Host "${Cyan}###########################################################################${Reset}"
-              Write-Host "${Green}➡️ LINK: $DownloadUrl${Reset}"
-              Write-Host "${Cyan}###########################################################################${Reset}"
-              Write-Host ""
-          } else {
-              Write-Warning "Gofile capture delivery dropped."
-          }
-
-      - name: Enforce 10-Second System Settlement Delay
-        run: |
-          Write-Host "Pausing for 10 seconds before proceeding to browser installation..."
-          Start-Sleep -Seconds 10
+          Write-Host "Authenticating tunnel framework..."
+          ngrok authtoken "${{ inputs.ngrok_token }}"
+          
+          Write-Host "Spawning background port forward tunnel over RDP port 3389..."
+          Start-Process -FilePath "ngrok" -ArgumentList "tcp", "3389", "--log=stdout" -NoNewWindow
 
       - name: Download & Force Consumer Build of Opera GX
         run: |
@@ -139,7 +96,6 @@ jobs:
           if (Test-Path "$userDesktop\Opera GX.lnk") { Remove-Item "$userDesktop\Opera GX.lnk" -Force -ErrorAction SilentlyContinue }
           if (Test-Path "$publicDesktop\Opera GX.lnk") { Remove-Item "$publicDesktop\Opera GX.lnk" -Force -ErrorAction SilentlyContinue }
           
-          Write-Host "Configuring explicit launcher shortcut with forced promo link and sidebar flags..."
           $operaExe = "$env:ProgramFiles\Opera GX\opera.exe"
           if (-not (Test-Path $operaExe)) { $operaExe = "$env:ProgramFiles (x86)\Opera GX\opera.exe" }
           
@@ -156,22 +112,33 @@ jobs:
           Start-Process "$publicDesktop\Opera GX Browser.lnk"
           Start-Sleep -Seconds 6
 
-      - name: Hide Host Agent Window ONLY (Targeted Minimization)
+      - name: Fetch and Display Live Connection Endpoint
         run: |
-          Write-Host "Targeting and minimizing host runner console window background thread..."
-          $memberDef = @'
-          [DllImport("user32.dll")]
-          public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
-          [DllImport("kernel32.dll")]
-          public static extern IntPtr GetConsoleWindow();
-          '@
-          $win32 = Add-Type -MemberDefinition $memberDef -Name "Win32Util" -Namespace "Win32" -PassThru
+          Start-Sleep -Seconds 2
+          Write-Host "Querying secure endpoint matrix..."
           
-          $consoleHandle = $win32::GetConsoleWindow()
-          if ($consoleHandle -ne [IntPtr]::Zero) {
-              $win32::ShowWindowAsync($consoleHandle, 2) | Out-Null
-              Write-Host "Host Agent window safely tucked away."
-          }
+          $Response = Invoke-WebRequest -Uri "http://127.0.0.1:4040/api/tunnels" -UseBasicParsing
+          $JObject = ConvertFrom-Json $Response.Content
+          $PublicUrl = $JObject.tunnels[0].public_url
+          
+          $CleanAddress = $PublicUrl -replace "tcp://", ""
+          
+          # ANSI Escape Sequences for final terminal connection display
+          $Esc = [char]27
+          $Cyan = "$Esc[36m"
+          $Yellow = "$Esc[33m"
+          $Green = "$Esc[32m"
+          $Reset = "$Esc[0m"
+
+          Write-Host ""
+          Write-Host "${Cyan}###########################################################################${Reset}"
+          Write-Host "${Yellow}🚨 ATTENTION: WINDOWS NATIVE RDP TUNNEL CONNECTION READY 🚨${Reset}"
+          Write-Host "👤 USERNAME: user" -ForegroundColor Yellow
+          Write-Host "🔒 PASSWORD: Pass1234" -ForegroundColor Yellow
+          Write-Host "###########################################################################${Reset}"
+          Write-Host "${Green}➡️ RDP COMPUTER / PC NAME ADDRESS: $CleanAddress${Reset}"
+          Write-Host "${Cyan}###########################################################################${Reset}"
+          Write-Host ""
 
       - name: Keep Alive Execution Loop
         run: |

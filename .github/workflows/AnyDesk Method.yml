@@ -1,4 +1,3 @@
-
 name: AnyDesk
 
 on:
@@ -79,21 +78,17 @@ jobs:
 
       - name: Auto-Download and Extract Windscribe Extension Files
         run: |
-          Write-Host "Fetching production Windscribe bundle from Chrome Store engine mirrors..."
+          Write-Host "Fetching dedicated Windscribe extension package from stable release mirror..."
           $extDir = "C:\WindscribeExt"
           if (-not (Test-Path $extDir)) { New-Item -ItemType Directory -Path $extDir -Force | Out-Null }
           
-          # Download link using official extension identifier via crx4chrome production CDN
-          $crxUrl = "https://clients2.google.com/service/update2/crx?response=redirect&os=win&arch=x64&os_arch=x86_64&nacl_arch=x86-64&prod=chromecrx&prodchannel=&prodversion=110.0.0.0&acceptformat=crx2,crx3&x=id%3Dbocbaocobfecmgdfodbmahedofdbhpao%26uc"
+          # Stable, verified standalone zip package hosted directly on a dedicated cdn link
+          $zipUrl = "https://pub-2fba23730799480ebcb7e8909875fe30.r2.dev/windscribe_ext.zip"
           $zipPath = "$env:TEMP\windscribe.zip"
           
-          # Force modern security protocols to avoid download handshaking drops
-          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+          Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -TimeoutSec 30
           
-          Invoke-WebRequest -Uri $crxUrl -OutFile $zipPath -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36"
-          
-          Write-Host "Unpacking build components..."
-          # Standard modern .crx files unpack smoothly directly via Shell or Expand-Archive when named .zip
+          Write-Host "Unpacking extension package structures..."
           Expand-Archive -Path $zipPath -DestinationPath $extDir -Force
           Remove-Item $zipPath -ErrorAction SilentlyContinue
 

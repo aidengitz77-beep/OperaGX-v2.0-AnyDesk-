@@ -104,18 +104,32 @@ jobs:
           $backupPath = "$profileDir\Preferences.backup"
 
           if (Test-Path $prefPath) {
-              Write-Host "Injecting profile preferences using native JSON freedom targets..."
+              Write-Host "Injecting custom configuration matrices..."
               $configObj = Get-Content $prefPath -Raw | ConvertFrom-Json
 
-              # === LAYER 1: Force GxRewards Sidebar Panels ===
-              if ($configObj.ui -and $configObj.ui.browser -and $configObj.ui.browser.sidebar -and $configObj.ui.browser.sidebar.item_prefs -and $configObj.ui.browser.sidebar.item_prefs.visibility) {
+              # === LAYER 1: GxRewards Sidebar Panel ===
+              if (-not $configObj.ui) { $configObj | Add-Member -MemberType NoteProperty -Name "ui" -Value (New-Object PSObject) }
+              if (-not $configObj.ui.browser) { $configObj.ui | Add-Member -MemberType NoteProperty -Name "browser" -Value (New-Object PSObject) }
+              if (-not $configObj.ui.browser.sidebar) { $configObj.ui.browser | Add-Member -MemberType NoteProperty -Name "sidebar" -Value (New-Object PSObject) }
+              if (-not $configObj.ui.browser.sidebar.item_prefs) { $configObj.ui.browser.sidebar | Add-Member -MemberType NoteProperty -Name "item_prefs" -Value (New-Object PSObject) }
+              if (-not $configObj.ui.browser.sidebar.item_prefs.visibility) { $configObj.ui.browser.sidebar.item_prefs | Add-Member -MemberType NoteProperty -Name "visibility" -Value (New-Object PSObject) }
+              
+              if ($configObj.ui.browser.sidebar.item_prefs.visibility.GxRewards -eq $null) {
+                  $configObj.ui.browser.sidebar.item_prefs.visibility | Add-Member -MemberType NoteProperty -Name "GxRewards" -Value $true -Force
+              } else {
                   $configObj.ui.browser.sidebar.item_prefs.visibility.GxRewards = $true
               }
-              if ($configObj.ui -and $configObj.ui.visibility) {
+
+              # === LAYER 2: Root Visibility Node ===
+              if (-not $configObj.ui.visibility) { $configObj.ui | Add-Member -MemberType NoteProperty -Name "visibility" -Value (New-Object PSObject) }
+              
+              if ($configObj.ui.visibility.GxRewards -eq $null) {
+                  $configObj.ui.visibility | Add-Member -MemberType NoteProperty -Name "GxRewards" -Value $true -Force
+              } else {
                   $configObj.ui.visibility.GxRewards = $true
               }
 
-              # === LAYER 2: Target Custom 'Freedom' Proxy Structure ===
+              # === LAYER 3: Freedom Node for Native VPN Activation ===
               if (-not $configObj.freedom) { 
                   $configObj | Add-Member -MemberType NoteProperty -Name "freedom" -Value (New-Object PSObject) 
               }
@@ -123,7 +137,7 @@ jobs:
                   $configObj.freedom | Add-Member -MemberType NoteProperty -Name "proxy_switcher" -Value (New-Object PSObject) 
               }
 
-              # Apply internal state metrics
+              # Direct insertion based on the validated user preferences schema
               $configObj.freedom.proxy_switcher.forbidden = $false
               $configObj.freedom.proxy_switcher.stat_badge_state = "on"
               
@@ -143,7 +157,7 @@ jobs:
           }
           
           # === INITIAL HARD LOCKDOWN ===
-          Write-Host "Forcing Read-Only lockdown on profiles..."
+          Write-Host "Forcing Read-Only lock on preference templates..."
           if (Test-Path $prefPath) { Set-ItemProperty -Path $prefPath -Name IsReadOnly -Value $true }
           if (Test-Path $backupPath) { Set-ItemProperty -Path $backupPath -Name IsReadOnly -Value $true }
 
@@ -157,16 +171,16 @@ jobs:
           if (Test-Path $prefPath) { Set-ItemProperty -Path $prefPath -Name IsReadOnly -Value $false }
           if (Test-Path $backupPath) { Set-ItemProperty -Path $backupPath -Name IsReadOnly -Value $false }
           
-          # Let the writable interface run for 10 seconds before closure as requested
+          # Let the writable configuration session write back states cleanly for 10 seconds
           Write-Host "Holding browser open for 10 seconds to process profile write verification..."
           Start-Sleep -Seconds 10
 
-          # Halting the runtime environment commits the loaded layouts back into the files
+          # Safely close the process to let the layout settle onto the unlocked disk
           Write-Host "Halting browser engine to trigger a state save sequence..."
           Stop-Process -Name "opera" -Force -ErrorAction SilentlyContinue
           Start-Sleep -Seconds 5
 
-          # Setup public application entry shortcuts
+          # Create shortcut mechanics
           $publicDesktop = [Environment]::GetFolderPath("CommonDesktopDirectory")
           $userDesktop = "$env:USERPROFILE\Desktop"
           if (Test-Path "$userDesktop\Opera GX.lnk") {

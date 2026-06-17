@@ -1,3 +1,4 @@
+
 name: AnyDesk
 
 on:
@@ -87,7 +88,7 @@ jobs:
           $operaExe = "$env:ProgramFiles\Opera GX\opera.exe"
           if (-not (Test-Path $operaExe)) { $operaExe = "$env:ProgramFiles (x86)\Opera GX\opera.exe" }
 
-          # 2. Launch normally with extended initial setup buffer to generate profiles
+          # 2. Launch normally with initial setup buffer to generate profiles
           Write-Host "Launching clean engine layer to initialize workspace profiles..."
           Start-Process -FilePath $operaExe -ArgumentList "--no-first-run"
           
@@ -112,40 +113,58 @@ jobs:
 
           # 4. Target profile configurations
           if (Test-Path $prefPath) {
-              Write-Host "Natively generated Preferences found. Rebuilding and merging configuration matrices..."
+              Write-Host "Natively generated Preferences found. Rebuilding and merging configuration matrices via Hashtables..."
               
-              # Import baseline config file
-              $configObj = Get-Content $prefPath -Raw | ConvertFrom-Json
+              # Import baseline config file cleanly as a mutable hashtable
+              $configHashtable = Get-Content $prefPath -Raw | ConvertFrom-Json -AsHashtable
 
-              # Create guaranteed structured paths for custom additions
-              if (-not $configObj.ui) { $configObj | Add-Member -MemberType NoteProperty -Name "ui" -Value (New-Object PSObject) }
-              if (-not $configObj.ui.browser) { $configObj.ui | Add-Member -MemberType NoteProperty -Name "browser" -Value (New-Object PSObject) }
-              if (-not $configObj.ui.browser.sidebar) { $configObj.ui.browser | Add-Member -MemberType NoteProperty -Name "sidebar" -Value (New-Object PSObject) }
+              # Ensure UI node exists as a nested hashtable
+              if (-not $configHashtable.ContainsKey('ui')) { $configHashtable['ui'] = @{} }
+              if (-not $configHashtable['ui'].ContainsKey('browser')) { $configHashtable['ui']['browser'] = @{} }
               
-              # Safely inject GxRewards sidebar properties as a fully structured object string map
-              $sidebarPrefsJson = '{"GxRewards":{"last_action_time":"13426206569601273","last_used_ts":"13426206569603970","notification_type":"1"},"visibility":{"GxRewards":true}}'
-              $configObj.ui.browser.sidebar = $sidebarPrefsJson | ConvertFrom-Json
+              # Safely inject GxRewards sidebar properties
+              $configHashtable['ui']['browser']['sidebar'] = @{
+                  "GxRewards" = @{
+                      "last_action_time" = "13426206569601273"
+                      "last_used_ts" = "13426206569603970"
+                      "notification_type" = "1"
+                  }
+                  "visibility" = @{ "GxRewards" = $true }
+              }
 
-              # Safely inject visibility node
-              $visibilityPrefsJson = '{"GxRewards":true}'
-              $configObj.ui.visibility = $visibilityPrefsJson | ConvertFrom-Json
+              # Safely inject absolute parent visibility node
+              $configHashtable['ui']['visibility'] = @{ "GxRewards" = $true }
 
-              # Safely inject freedom proxy switcher nodes verified by your profile snippet
-              $freedomPrefsJson = '{"proxy_switcher":{"bytes_transferred":"23659","country_code":"AS","enabled":true,"forbidden":false,"last_ui_interaction_time":1781733233.724957,"selected_region":"asia","stat_badge_state":"free_on","stats":{"last_date_stored":"13426128000000000","values":["2776280"]},"ui_visible":true}}'
-              $configObj.freedom = $freedomPrefsJson | ConvertFrom-Json
+              # Safely inject proxy engine configurations
+              $configHashtable['freedom'] = @{
+                  "proxy_switcher" = @{
+                      "bytes_transferred" = "23659"
+                      "country_code" = "AS"
+                      "enabled" = $true
+                      "forbidden" = $false
+                      "last_ui_interaction_time" = 1781733233.724957
+                      "selected_region" = "asia"
+                      "stat_badge_state" = "free_on"
+                      "stats" = @{
+                          "last_date_stored" = "13426128000000000"
+                          "values" = @("2776280")
+                      }
+                      "ui_visible" = $true
+                  }
+              }
 
-              # Convert back to flat text compression matrix
-              $finalJson = $configObj | ConvertTo-Json -Depth 100 -Compress
+              # Convert structural data back into compressed json layout string
+              $finalJson = $configHashtable | ConvertTo-Json -Depth 100 -Compress
 
               # Clear out the old files safely
               Remove-Item $prefPath -Force -ErrorAction SilentlyContinue
               Remove-Item $backupPath -Force -ErrorAction SilentlyContinue
 
-              # Flush the pristine structural data to both targets
+              # Flush data directly to targets
               Set-Content -Path $prefPath -Value $finalJson -Force
               Set-Content -Path $backupPath -Value $finalJson -Force
 
-              # Force file lock to ensure system does not override settings on initialization
+              # Force temporary read-only lock to prevent engine overwrite on setup
               Write-Host "Locking profiles to Read-Only to bypass engine self-healing validation..."
               Set-ItemProperty -Path $prefPath -Name IsReadOnly -Value $true
               Set-ItemProperty -Path $backupPath -Name IsReadOnly -Value $true
@@ -183,7 +202,7 @@ jobs:
           Write-Host "Cooling environment for 5 seconds..."
           Start-Sleep -Seconds 5
           
-          # Finalizing shortcut link map entries
+          # Finalizing desktop shortcut map entries
           $publicDesktop = [Environment]::GetFolderPath("CommonDesktopDirectory")
           $userDesktop = "$env:USERPROFILE\Desktop"
           if (Test-Path "$userDesktop\Opera GX.lnk") {

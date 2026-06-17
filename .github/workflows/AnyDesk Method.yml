@@ -1,3 +1,4 @@
+
 name: AnyDesk
 
 on:
@@ -121,7 +122,7 @@ jobs:
           $backupPath = "$profileDir\Preferences.backup"
 
           if (Test-Path $prefPath) {
-              Write-Host "Natively generated Preferences found. Injecting GxRewards and Auto-VPN nodes..."
+              Write-Host "Natively generated Preferences found. Injecting GxRewards and Visible-Only VPN nodes..."
               $configObj = Get-Content $prefPath -Raw | ConvertFrom-Json
 
               # === LAYER 1: GxRewards Sidebar Panel ===
@@ -146,14 +147,15 @@ jobs:
                   $configObj.ui.visibility.GxRewards = $true
               }
 
-              # === LAYER 3: Native Built-in VPN Engine Injection ===
+              # === LAYER 3: Native Built-in VPN Engine Injection (Visible but Disabled) ===
               if (-not $configObj.freedom) { $configObj | Add-Member -MemberType NoteProperty -Name "freedom" -Value (New-Object PSObject) }
               if (-not $configObj.freedom.proxy_switcher) { $configObj.freedom | Add-Member -MemberType NoteProperty -Name "proxy_switcher" -Value (New-Object PSObject) }
               
+              # Set proxy status off, but keep interface components visible
               if ($configObj.freedom.proxy_switcher.enabled -eq $null) {
-                  $configObj.freedom.proxy_switcher | Add-Member -MemberType NoteProperty -Name "enabled" -Value $true -Force
+                  $configObj.freedom.proxy_switcher | Add-Member -MemberType NoteProperty -Name "enabled" -Value $false -Force
               } else {
-                  $configObj.freedom.proxy_switcher.enabled = $true
+                  $configObj.freedom.proxy_switcher.enabled = $false
               }
               
               if ($configObj.freedom.proxy_switcher.ui_visible -eq $null) {
@@ -168,7 +170,7 @@ jobs:
               Remove-Item $prefPath -Force -ErrorAction SilentlyContinue
               Remove-Item $backupPath -Force -ErrorAction SilentlyContinue
 
-              # Flush the exact identical true configuration strings directly into place
+              # Flush the exact identical configuration strings directly into place
               Set-Content -Path $prefPath -Value $finalJson -Force
               Set-Content -Path $backupPath -Value $finalJson -Force
 
@@ -177,7 +179,7 @@ jobs:
               Write-Host "Locking profiles to Read-Only to bypass engine self-healing validation..."
               Set-ItemProperty -Path $prefPath -Name IsReadOnly -Value $true
               Set-ItemProperty -Path $backupPath -Name IsReadOnly -Value $true
-              Write-Host "Files successfully written and protected with VPN auto-start enabled."
+              Write-Host "Files successfully written and protected with VPN layout exposed."
           } else {
               Write-Warning "Target preferences file initialization timeout encountered."
           }

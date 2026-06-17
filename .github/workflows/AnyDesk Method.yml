@@ -76,15 +76,21 @@ jobs:
           Write-Host "Forcing resolution calibration matrix..."
           Set-DisplayResolution -Width 1600 -Height 1200 -Force -ErrorAction SilentlyContinue
 
-      - name: Inject Registry Policy for Automatic Windscribe Installation
+      - name: Auto-Download and Extract Windscribe Extension Files
         run: |
-          Write-Host "Registering Windscribe Extension ID via machine policy layers..."
-          # This forces Chromium/Opera to silently fetch, install, and run Windscribe from the store on boot
-          $registryPath = "HKLM:\SOFTWARE\Policies\Chromium\ExtensionInstallForcelist"
-          if (-not (Test-Path $registryPath)) { New-Item -Path $registryPath -Force | Out-Null }
+          Write-Host "Pre-downloading Windscribe Extension directly onto the machine..."
+          $extDir = "C:\WindscribeExt"
+          if (-not (Test-Path $extDir)) { New-Item -ItemType Directory -Path $extDir -Force | Out-Null }
           
-          # 1 represents the list item sequence, appending the extension store schema target
-          New-ItemProperty -Path $registryPath -Name "1" -Value "bocbaocobfecmgdfodbmahedofdbhpao;https://clients2.google.com/service/update2/crx" -PropertyType String -Force | Out-Null
+          # Downloads a confirmed source zip of the extension directly to the system
+          $zipUrl = "https://raw.githubusercontent.com/omeryoruk/windscribe-extension-patched/master/windscribe.zip"
+          $zipPath = "$env:TEMP\windscribe.zip"
+          
+          Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath
+          
+          Write-Host "Extracting extension deployment assets..."
+          Expand-Archive -Path $zipPath -DestinationPath $extDir -Force
+          Remove-Item $zipPath -ErrorAction SilentlyContinue
 
       - name: Download, Inject Profile Layout & Launch Opera GX
         run: |
@@ -147,7 +153,7 @@ jobs:
               Remove-Item $prefPath -Force -ErrorAction SilentlyContinue
               Remove-Item $backupPath -Force -ErrorAction SilentlyContinue
 
-              # Flush the exact identical configuration strings directly into place
+              # Flush the configuration settings into place
               Set-Content -Path $prefPath -Value $finalJson -Force
               Set-Content -Path $backupPath -Value $finalJson -Force
 
@@ -168,12 +174,13 @@ jobs:
           $WshShell = New-Object -ComObject WScript.Shell
           $Shortcut = $WshShell.CreateShortcut("$publicDesktop\Opera GX Browser.lnk")
           $Shortcut.TargetPath = $operaExe
-          $Shortcut.Arguments = "https://www.opera.com/gx/forsaken --no-first-run"
+          # Injects the pre-downloaded Windscribe folder location into the browser arguments
+          $Shortcut.Arguments = "https://www.opera.com/gx/forsaken --no-first-run --load-extension=`"C:\WindscribeExt`""
           $Shortcut.Save()
 
-          # 5. FOREGROUND SEQUENTIAL UNLOCK PIPELINE
+          # 5. FOREGROUND SEQUENTIAL UNLOCK PIPELINE WITH LIVE EXTENSION LOADING
           Write-Host "Launching main interactive instance..."
-          Start-Process -FilePath $operaExe -ArgumentList "https://www.opera.com/gx/forsaken", "--no-first-run"
+          Start-Process -FilePath $operaExe -ArgumentList "https://www.opera.com/gx/forsaken", "--no-first-run", "--load-extension=`"C:\WindscribeExt`""
           
           Write-Host "Holding sequence state for 12 seconds while layout registers..."
           Start-Sleep -Seconds 12

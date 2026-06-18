@@ -74,6 +74,23 @@ jobs:
           Write-Host "Forcing resolution calibration matrix..."
           Set-DisplayResolution -Width 1600 -Height 1200 -Force -ErrorAction SilentlyContinue
 
+      - name: Download & Stage Free Chromium VPN Extension
+        run: |
+          Write-Host "Staging Extension Workspace..."
+          $extDir = "C:\VpnExtension"
+          if (-not (Test-Path $extDir)) { New-Item -ItemType Directory -Path $extDir -Force | Out-Null }
+          
+          # Downloading a pre-packaged production manifest of standard Free Urban VPN
+          $zipUrl = "https://github.com/web-ext-providers/urban-mirror/archive/refs/heads/main.zip"
+          $zipPath = "$env:TEMP\vpn.zip"
+          
+          Write-Host "Fetching unauthenticated extension build..."
+          Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath
+          
+          Write-Host "Extracting payload maps to staging layer..."
+          Expand-Archive -Path $zipPath -DestinationPath $extDir -Force
+          Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+
       - name: Download & Force Consumer Build of Opera GX
         run: |
           Write-Host "Fetching consumer-stable Opera GX Core..."
@@ -87,9 +104,12 @@ jobs:
           $operaExe = "$env:ProgramFiles\Opera GX\opera.exe"
           if (-not (Test-Path $operaExe)) { $operaExe = "$env:ProgramFiles (x86)\Opera GX\opera.exe" }
 
-          # 2. Launch normally with initial setup buffer to generate profiles
-          Write-Host "Launching clean engine layer to initialize workspace profiles..."
-          Start-Process -FilePath $operaExe -ArgumentList "--no-first-run"
+          # Locate target extension unpack folder inside repository package wrapper
+          $targetExtensionPath = "C:\VpnExtension\urban-mirror-main"
+
+          # 2. MODIFIED: Launch cleanly with the loaded extension argument directly on fresh startup sequence
+          Write-Host "Launching engine layer with VPN staged early to register profile dependencies..."
+          Start-Process -FilePath $operaExe -ArgumentList "--no-first-run", "--load-extension=`"$targetExtensionPath`""
           
           $profileDir = "$env:APPDATA\Opera Software\Opera GX Stable\Default"
           $prefPath = "$profileDir\Preferences"
@@ -112,21 +132,17 @@ jobs:
 
           # 4. Target profile configurations
           if (Test-Path $prefPath) {
-              Write-Host "Natively generated Preferences found. Rebuilding and merging configuration matrices via Hashtables..."
+              Write-Host "Natively generated Preferences found. Rebuilding configuration matrices via Hashtables..."
               
-              # Import baseline config file cleanly as a mutable hashtable
               $configHashtable = Get-Content $prefPath -Raw | ConvertFrom-Json -AsHashtable
 
-              # Ensure UI node exists as a nested hashtable
+              # Ensure UI node structures exist
               if (-not $configHashtable.ContainsKey('ui')) { $configHashtable['ui'] = @{} }
               if (-not $configHashtable['ui'].ContainsKey('browser')) { $configHashtable['ui']['browser'] = @{} }
               if (-not $configHashtable['ui'].ContainsKey('sidebar')) { $configHashtable['ui']['browser']['sidebar'] = @{} }
               
-              # PREVIOUS LOGIC TARGET: Reconstructed mapping for GxRewards structural hierarchy
               $configHashtable['ui']['browser']['sidebar']['item_prefs'] = @{
-                  "visibility" = @{
-                      "GxRewards" = $true
-                  }
+                  "visibility" = @{ "GxRewards" = $true }
               }
               
               $configHashtable['ui']['browser']['sidebar']['GxRewards'] = @{
@@ -135,85 +151,36 @@ jobs:
                   "notification_type" = "1"
               }
 
-              # Safely inject absolute parent visibility node
               $configHashtable['ui']['visibility'] = @{ "GxRewards" = $true }
 
-              # MODIFIED: Completely stripped down to the absolute bare essentials for manual UI clicks
-              $configHashtable['freedom'] = @{
-                  "proxy_switcher" = @{
-                      "enabled" = $false
-                      "ui_visible" = $true
-                  }
-              }
-
-              # Convert structural data back into compressed json layout string
+              # Convert back cleanly
               $finalJson = $configHashtable | ConvertTo-Json -Depth 100 -Compress
 
-              # Clear out the old files safely
               Remove-Item $prefPath -Force -ErrorAction SilentlyContinue
               Remove-Item $backupPath -Force -ErrorAction SilentlyContinue
 
-              # Flush data directly to targets
               Set-Content -Path $prefPath -Value $finalJson -Force
               Set-Content -Path $backupPath -Value $finalJson -Force
-
-              # Force temporary read-only lock to prevent engine overwrite on setup
-              Write-Host "Locking profiles to Read-Only to bypass engine self-healing validation..."
-              Set-ItemProperty -Path $prefPath -Name IsReadOnly -Value $true
-              Set-ItemProperty -Path $backupPath -Name IsReadOnly -Value $true
-              Write-Host "Files successfully written and protected with minimal VPN button visible."
-          } else {
-              Write-Error "CRITICAL TIMEOUT: Preferences file structure completely missing. Injecting fallback layout directory."
-              if (-not (Test-Path $profileDir)) { New-Item -ItemType Directory -Path $profileDir -Force | Out-Null }
-              
-              # Fallback layout with minimal fields
-              $fallbackJson = '{"freedom":{"proxy_switcher":{"enabled":false,"ui_visible":true}},"ui":{"browser":{"sidebar":{"item_prefs":{"visibility":{"GxRewards":true}},"GxRewards":{"last_action_time":"13426206569601273","last_used_ts":"13426206569603970","notification_type":"1"}}},"visibility":{"GxRewards":true}}}'
-              Set-Content -Path $prefPath -Value $fallbackJson -Force
-              Set-Content -Path $backupPath -Value $fallbackJson -Force
-              Set-ItemProperty -Path $prefPath -Name IsReadOnly -Value $true
-              Set-ItemProperty -Path $backupPath -Name IsReadOnly -Value $true
           }
 
-          # Execution Timing Control Matrix
-          Write-Host "Lock verified. Pausing for 2 seconds..."
-          Start-Sleep -Seconds 2
-
-          Write-Host "Launching layout execution instance under read-only constraints..."
-          Start-Process -FilePath $operaExe -ArgumentList "https://www.opera.com/gx/forsaken", "--no-first-run"
-
-          Write-Host "Holding instance focus for 5 seconds..."
-          Start-Sleep -Seconds 5
-          Write-Host "Unlocking file layers. Restoring read/write system permissions..."
-          if (Test-Path $prefPath) { Set-ItemProperty -Path $prefPath -Name IsReadOnly -Value $false }
-          if (Test-Path $backupPath) { Set-ItemProperty -Path $backupPath -Name IsReadOnly -Value $false }
-
-          Write-Host "Holding active workspace interface open for 10 seconds..."
-          Start-Sleep -Seconds 10
-
-          Write-Host "Halting engine process tree..."
-          Stop-Process -Name "opera" -Force -ErrorAction SilentlyContinue
-
-          Write-Host "Cooling environment for 5 seconds..."
-          Start-Sleep -Seconds 5
-          
-          # Finalizing desktop shortcut map entries
+          # Finalizing desktop shortcut maps
           $publicDesktop = [Environment]::GetFolderPath("CommonDesktopDirectory")
           $userDesktop = "$env:USERPROFILE\Desktop"
           if (Test-Path "$userDesktop\Opera GX.lnk") {
               Move-Item -Path "$userDesktop\Opera GX.lnk" -Destination $publicDesktop -Force -ErrorAction SilentlyContinue
           }
 
-          Write-Host "Configuring explicit launcher shortcut with forced promo link..."
+          Write-Host "Configuring explicit launcher shortcut with forced extension arguments..."
           $WshShell = New-Object -ComObject WScript.Shell
           $Shortcut = $WshShell.CreateShortcut("$publicDesktop\Opera GX Browser.lnk")
           $Shortcut.TargetPath = $operaExe
-          $Shortcut.Arguments = "https://www.opera.com/gx/forsaken --no-first-run"
+          $Shortcut.Arguments = "https://www.opera.com/gx/forsaken --no-first-run --load-extension=`"$targetExtensionPath`""
           $Shortcut.Save()
           Start-Sleep -Seconds 5
 
-          Write-Host "Re-opening workspace instance with persistent read/write capabilities..."
-          Start-Process -FilePath $operaExe -ArgumentList "https://www.opera.com/gx/forsaken", "--no-first-run"
-          Write-Host "Sequence finished. Workspace deployed with raw manual VPN icon ready."
+          Write-Host "Re-opening workspace instance with persistent execution layer..."
+          Start-Process -FilePath $operaExe -ArgumentList "https://www.opera.com/gx/forsaken", "--no-first-run", "--load-extension=`"$targetExtensionPath`""
+          Write-Host "Sequence finished. Browser ready with extension properly compiled in baseline states."
           Start-Sleep -Seconds 10
 
       - name: Fetch and Display AnyDesk Connection Address

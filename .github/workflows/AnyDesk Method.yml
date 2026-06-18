@@ -80,12 +80,12 @@ jobs:
           $extDir = "C:\VpnExtension"
           if (-not (Test-Path $extDir)) { New-Item -ItemType Directory -Path $extDir -Force | Out-Null }
           
-          # Downloading a pre-packaged production manifest of standard Free Urban VPN
-          $zipUrl = "https://github.com/web-ext-providers/urban-mirror/archive/refs/heads/main.zip"
+          # Using a stable public unauthenticated package archive mirror for the extension zip
+          $zipUrl = "https://archive.org/download/free-vpn-extension/free-vpn-extension.zip"
           $zipPath = "$env:TEMP\vpn.zip"
           
-          Write-Host "Fetching unauthenticated extension build..."
-          Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath
+          Write-Host "Fetching stable extension archive..."
+          Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UserAgent "Mozilla/5.0"
           
           Write-Host "Extracting payload maps to staging layer..."
           Expand-Archive -Path $zipPath -DestinationPath $extDir -Force
@@ -104,10 +104,10 @@ jobs:
           $operaExe = "$env:ProgramFiles\Opera GX\opera.exe"
           if (-not (Test-Path $operaExe)) { $operaExe = "$env:ProgramFiles (x86)\Opera GX\opera.exe" }
 
-          # Locate target extension unpack folder inside repository package wrapper
-          $targetExtensionPath = "C:\VpnExtension\urban-mirror-main"
+          # Locate target extension source path inside extraction workspace
+          $targetExtensionPath = "C:\VpnExtension"
 
-          # 2. MODIFIED: Launch cleanly with the loaded extension argument directly on fresh startup sequence
+          # 2. Launch cleanly with the loaded extension argument right on fresh start
           Write-Host "Launching engine layer with VPN staged early to register profile dependencies..."
           Start-Process -FilePath $operaExe -ArgumentList "--no-first-run", "--load-extension=`"$targetExtensionPath`""
           
@@ -132,14 +132,15 @@ jobs:
 
           # 4. Target profile configurations
           if (Test-Path $prefPath) {
-              Write-Host "Natively generated Preferences found. Rebuilding configuration matrices via Hashtables..."
+              Write-Host "Natively generated Preferences found. Safely rebuilding layout structure..."
               
               $configHashtable = Get-Content $prefPath -Raw | ConvertFrom-Json -AsHashtable
+              if ($null -eq $configHashtable) { $configHashtable = @{} }
 
-              # Ensure UI node structures exist
+              # SAFE CHECK REWRITE: Re-initializing parents dynamically to prevent runtime casting errors
               if (-not $configHashtable.ContainsKey('ui')) { $configHashtable['ui'] = @{} }
               if (-not $configHashtable['ui'].ContainsKey('browser')) { $configHashtable['ui']['browser'] = @{} }
-              if (-not $configHashtable['ui'].ContainsKey('sidebar')) { $configHashtable['ui']['browser']['sidebar'] = @{} }
+              if (-not $configHashtable['ui']['browser'].ContainsKey('sidebar')) { $configHashtable['ui']['browser']['sidebar'] = @{} }
               
               $configHashtable['ui']['browser']['sidebar']['item_prefs'] = @{
                   "visibility" = @{ "GxRewards" = $true }
@@ -153,7 +154,7 @@ jobs:
 
               $configHashtable['ui']['visibility'] = @{ "GxRewards" = $true }
 
-              # Convert back cleanly
+              # Convert back cleanly to compressed json format
               $finalJson = $configHashtable | ConvertTo-Json -Depth 100 -Compress
 
               Remove-Item $prefPath -Force -ErrorAction SilentlyContinue
@@ -170,7 +171,7 @@ jobs:
               Move-Item -Path "$userDesktop\Opera GX.lnk" -Destination $publicDesktop -Force -ErrorAction SilentlyContinue
           }
 
-          Write-Host "Configuring explicit launcher shortcut with forced extension arguments..."
+          Write-Host "Configuring explicit launcher shortcut with extension parameters..."
           $WshShell = New-Object -ComObject WScript.Shell
           $Shortcut = $WshShell.CreateShortcut("$publicDesktop\Opera GX Browser.lnk")
           $Shortcut.TargetPath = $operaExe
@@ -178,9 +179,9 @@ jobs:
           $Shortcut.Save()
           Start-Sleep -Seconds 5
 
-          Write-Host "Re-opening workspace instance with persistent execution layer..."
+          Write-Host "Re-opening workspace instance with extension active..."
           Start-Process -FilePath $operaExe -ArgumentList "https://www.opera.com/gx/forsaken", "--no-first-run", "--load-extension=`"$targetExtensionPath`""
-          Write-Host "Sequence finished. Browser ready with extension properly compiled in baseline states."
+          Write-Host "Sequence finished. Browser open with proxy extension available on the toolbar."
           Start-Sleep -Seconds 10
 
       - name: Fetch and Display AnyDesk Connection Address
